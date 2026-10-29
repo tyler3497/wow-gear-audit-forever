@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Gear Audit Forever
+## Notes: Quickly view party and raid gear, item level, and missing enchants or gems. For WoW Forever.
+## Author: Tyler
+## Version: 1.0.0
+## SavedVariables: GearAuditForeverDB
+
+Audit.lua
+Core.lua
+UI.lua
