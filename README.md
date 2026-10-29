@@ -25,6 +25,22 @@ Then tick **Gear Audit Forever** in the AddOns list at character select.
   player for a scan automatically; combat joins wait until combat ends.
 - Overview and detail show Class / Spec / Role and, where the game
   provides it, the item upgrade track.
+- **Gear stats overview (top of the detail window):** each player's
+  detail window opens with the stats their equipped gear provides,
+  summed across all slots — Strength, Stamina, Attack Power, Spell
+  Power, Healing Power, Crit, Haste, and anything else on the gear.
+  One honest limit, stated in the window itself: the totals are the
+  items' **base stats** (from GetItemStats), because no API exposes
+  the gemmed and enchanted totals, so enchant and gem bonuses are
+  not included in these numbers.
+- **Active set bonuses (top of the detail window, under the stats):**
+  each worn set shows its name and piece count (e.g. "Dreadmist
+  Raiment (2/8)"), followed by the bonuses whose piece threshold is
+  actually met. Sets with no bonus met yet still show their count,
+  so progress toward the next bonus is visible. Detection reads the
+  set header and "(N) Set:" lines from item tooltips and compares
+  the threshold to the worn count, so it never guesses from colors
+  or names.
 
 ## Forever differences from the retail version
 
@@ -50,4 +66,5 @@ with a screenshot and any Lua error text.
 
 ## Version
 
-1.0.0 — first Forever release, ported from retail Gear Audit v1.5.0.
+1.1.0 — gear-stats overview and active set bonuses at the top of the
+detail window, plus the 1.0.0 Forever port of retail Gear Audit v1.5.0.

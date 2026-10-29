@@ -174,6 +174,7 @@ function GA.GetTooltipData(unit, slotId)
     end
     local total, filled = 0, 0
     local track, level, maxLevel = nil, nil, nil
+    local setName, setWorn, setTotal, setBonuses = nil, nil, nil, nil
     for _, line in ipairs(data.lines) do
         local isSocket = false
         if Enum and Enum.TooltipDataLineType and Enum.TooltipDataLineType.GemSocket then
@@ -194,6 +195,22 @@ function GA.GetTooltipData(unit, slotId)
             if t and l and m then
                 track, level, maxLevel = t, tonumber(l), tonumber(m)
             end
+            -- Set header: "Set Name (2/8)" — the worn/total
+            -- count for this item's set.
+            local name, worn, pieces = text:match("^(.-)%s*%((%d+)/(%d+)%)%s*$")
+            if name and worn and pieces then
+                setName, setWorn, setTotal = name, tonumber(worn), tonumber(pieces)
+            end
+            -- Set bonus line: "(2) Set: ..." — the threshold
+            -- is the number in parentheses. Active is decided
+            -- later by comparing it to the worn count, not by
+            -- trusting tooltip colours (which vary by client).
+            local threshold, bonus = text:match("^%((%d+)%)%s*(.+)$")
+            if threshold and bonus then
+                setBonuses = setBonuses or {}
+                bonus = bonus:gsub("^Set:%s*", "")
+                setBonuses[#setBonuses + 1] = { threshold = tonumber(threshold), text = bonus }
+            end
         end
     end
     return {
@@ -202,6 +219,10 @@ function GA.GetTooltipData(unit, slotId)
         upgradeTrack = track,
         upgradeLevel = level,
         upgradeMax = maxLevel,
+        setName = setName,
+        setWorn = setWorn,
+        setTotal = setTotal,
+        setBonuses = setBonuses,
     }
 end
 
@@ -210,6 +231,89 @@ function GA.CountSockets(unit, slotId)
     local data = GA.GetTooltipData(unit, slotId)
     if not data then return nil, nil end
     return data.sockets, data.filledSockets
+end
+
+-- Base item stats for one item link, via GetItemStats.
+-- Guarded like everything else: a missing API gives nil,
+-- never an error. IMPORTANT: GetItemStats returns the base
+-- version of the item only — enchant and gem bonuses are NOT
+-- included, and there is no API that gives the gemmed and
+-- enchanted totals. The overview therefore sums base item
+-- stats, and the UI says so; it never claims to include
+-- enchant/gem contributions. Uncached items return an empty
+-- table, which is nil here, so stats fill in as item data
+-- loads (the re-inspect/merge flow warms the cache).
+function GA.GetItemStats(link)
+    if not link or not GetItemStats then return nil end
+    local ok, stats = pcall(GetItemStats, link)
+    if not ok or type(stats) ~= "table" then return nil end
+    local out = {}
+    for k, v in pairs(stats) do
+        if type(v) == "number" and v ~= 0 then
+            out[k] = v
+        end
+    end
+    if next(out) == nil then return nil end
+    return out
+end
+
+-- Sum base item stats across a gear table (slotId -> audit).
+function GA.SumGearStats(gear)
+    local total = {}
+    if not gear then return total end
+    for _, slot in ipairs(GA.SLOTS) do
+        local audit = gear[slot.id]
+        if audit and audit.stats then
+            for k, v in pairs(audit.stats) do
+                total[k] = (total[k] or 0) + v
+            end
+        end
+    end
+    return total
+end
+
+-- Aggregate set bonuses across a gear table. One entry per
+-- set, in first-seen slot order, with the worn count (the max
+-- count any piece reported) and the bonus list sorted by
+-- threshold, each flagged active when its threshold is met.
+function GA.AggregateSets(gear)
+    local byName = {}
+    local order = {}
+    if gear then
+        for _, slot in ipairs(GA.SLOTS) do
+            local audit = gear[slot.id]
+            if audit and audit.setName then
+                local s = byName[audit.setName]
+                if not s then
+                    s = { name = audit.setName, worn = 0, total = 0, bonuses = {} }
+                    byName[audit.setName] = s
+                    order[#order + 1] = s
+                end
+                if audit.setWorn and audit.setWorn > s.worn then s.worn = audit.setWorn end
+                if audit.setTotal and audit.setTotal > s.total then s.total = audit.setTotal end
+                if audit.setBonuses then
+                    for _, b in ipairs(audit.setBonuses) do
+                        if not s.bonuses[b.threshold] then
+                            s.bonuses[b.threshold] = b.text
+                        end
+                    end
+                end
+            end
+        end
+    end
+    for _, s in ipairs(order) do
+        local list = {}
+        for threshold, text in pairs(s.bonuses) do
+            list[#list + 1] = { threshold = threshold, text = text }
+        end
+        table.sort(list, function(a, b) return a.threshold < b.threshold end)
+        for _, b in ipairs(list) do
+            b.active = b.threshold <= s.worn
+        end
+        s.bonusList = list
+        s.bonuses = nil
+    end
+    return order
 end
 
 -- Class / spec / role for a unit.
@@ -392,7 +496,12 @@ function GA.AuditSlot(unit, slotId)
         if tooltip.upgradeTrack and tooltip.upgradeLevel and tooltip.upgradeMax then
             result.upgradeText = tooltip.upgradeTrack .. " " .. tooltip.upgradeLevel .. "/" .. tooltip.upgradeMax
         end
+        result.setName = tooltip.setName
+        result.setWorn = tooltip.setWorn
+        result.setTotal = tooltip.setTotal
+        result.setBonuses = tooltip.setBonuses
     end
+    result.stats = GA.GetItemStats(link)
     return result
 end
 
@@ -437,6 +546,8 @@ function GA.AuditUnit(unit)
         missingEnchantCount = #missingEnchants,
         missingGemCount = missingGems,
         spec = spec,
+        stats = GA.SumGearStats(gear),
+        sets = GA.AggregateSets(gear),
     }
 end
 
@@ -502,5 +613,7 @@ function GA.MergeAudits(old, new)
         missingEnchantCount = #missingEnchants,
         missingGemCount = missingGems,
         spec = spec,
+        stats = GA.SumGearStats(gear),
+        sets = GA.AggregateSets(gear),
     }
 end

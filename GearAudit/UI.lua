@@ -317,7 +317,7 @@ end
 -- ------------------------------------------------------------------
 -- Detail panel
 -- ------------------------------------------------------------------
-local detail = CreateModernFrame("GearAuditDetailFrame", 640, 660)
+local detail = CreateModernFrame("GearAuditDetailFrame", 640, 740)
 detail:SetPoint("LEFT", main, "RIGHT", 8, 0)
 detail:SetFrameStrata("DIALOG")
 
@@ -360,21 +360,38 @@ detailRefresh:SetScript("OnClick", function()
     if GA.selectedUnit then GA.RefreshUnit(GA.selectedUnit) end
 end)
 
+-- Gear-stats overview and active set bonuses, at the top of
+-- the detail window (above the slot list). Both FontStrings
+-- are empty when there is nothing to show, so the block takes
+-- no space on players with no usable stat/set data.
+local detailStats = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+detailStats:SetPoint("TOPLEFT", detail, "TOPLEFT", 16, -156)
+detailStats:SetPoint("TOPRIGHT", detail, "TOPRIGHT", -16, -156)
+detailStats:SetJustifyH("LEFT")
+detailStats:SetTextColor(COL_TEXT[1], COL_TEXT[2], COL_TEXT[3])
+detailStats:SetText("")
+local detailSets = detail:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+detailSets:SetPoint("TOPLEFT", detailStats, "BOTTOMLEFT", 0, -6)
+detailSets:SetPoint("TOPRIGHT", detailStats, "BOTTOMRIGHT", 0, -6)
+detailSets:SetJustifyH("LEFT")
+detailSets:SetTextColor(COL_TEXT[1], COL_TEXT[2], COL_TEXT[3])
+detailSets:SetText("")
+
 -- Detail column headers, same X as the slot columns below.
-MakeHeader(detail, COL_SLOT, "SLOT", -164)
-MakeHeader(detail, COL_ITEM, "ITEM", -164)
-MakeHeader(detail, COL_UPGRADE, "UPGRADE", -164)
-MakeHeader(detail, COL_AUDIT, "AUDIT", -164)
+MakeHeader(detail, COL_SLOT, "SLOT", -264)
+MakeHeader(detail, COL_ITEM, "ITEM", -264)
+MakeHeader(detail, COL_UPGRADE, "UPGRADE", -264)
+MakeHeader(detail, COL_AUDIT, "AUDIT", -264)
 
 local detailHeaderLine = detail:CreateTexture(nil, "OVERLAY")
-detailHeaderLine:SetPoint("TOPLEFT", detail, "TOPLEFT", 16, -178)
-detailHeaderLine:SetPoint("TOPRIGHT", detail, "TOPRIGHT", -16, -178)
+detailHeaderLine:SetPoint("TOPLEFT", detail, "TOPLEFT", 16, -278)
+detailHeaderLine:SetPoint("TOPRIGHT", detail, "TOPRIGHT", -16, -278)
 detailHeaderLine:SetHeight(1)
 detailHeaderLine:SetColorTexture(COL_BORDER[1], COL_BORDER[2], COL_BORDER[3], 1)
 
 local detailSlots = {}
 for i, slot in ipairs(GA.SLOTS) do
-    local y = -188 - (i - 1) * 28
+    local y = -288 - (i - 1) * 28
     local iconFrame = CreateFrame("Frame", nil, detail, "BackdropTemplate")
     iconFrame:SetSize(26, 26)
     iconFrame:SetPoint("TOPLEFT", detail, "TOPLEFT", 16, y)
@@ -425,6 +442,95 @@ for i, slot in ipairs(GA.SLOTS) do
     flags:SetJustifyH("LEFT")
 
     detailSlots[i] = { slot = slot, iconFrame = iconFrame, icon = icon, label = label, itemBtn = itemBtn, upgradeText = upgradeText, flags = flags }
+end
+
+-- Gear-stats display order: primaries first, then the power
+-- stats, then ratings. Any summed stat not listed here still
+-- shows, appended after these in label order, so a stat the
+-- list missed is never silently dropped.
+local STAT_ORDER = {
+    "ITEM_MOD_STRENGTH_SHORT", "ITEM_MOD_AGILITY_SHORT",
+    "ITEM_MOD_STAMINA_SHORT", "ITEM_MOD_INTELLECT_SHORT",
+    "ITEM_MOD_SPIRIT_SHORT",
+    "ITEM_MOD_ATTACK_POWER_SHORT", "ITEM_MOD_RANGED_ATTACK_POWER_SHORT",
+    "ITEM_MOD_SPELL_POWER_SHORT", "ITEM_MOD_SPELL_DAMAGE_DONE_SHORT",
+    "ITEM_MOD_SPELL_HEALING_DONE_SHORT",
+    "ITEM_MOD_CRIT_RATING_SHORT", "ITEM_MOD_CRIT_MELEE_RATING_SHORT",
+    "ITEM_MOD_CRIT_RANGED_RATING_SHORT", "ITEM_MOD_CRIT_SPELL_RATING_SHORT",
+    "ITEM_MOD_HIT_RATING_SHORT", "ITEM_MOD_HIT_MELEE_RATING_SHORT",
+    "ITEM_MOD_HIT_RANGED_RATING_SHORT", "ITEM_MOD_HIT_SPELL_RATING_SHORT",
+    "ITEM_MOD_HASTE_RATING_SHORT", "ITEM_MOD_MASTERY_RATING_SHORT",
+    "ITEM_MOD_VERSATILITY",
+    "ITEM_MOD_DODGE_RATING_SHORT", "ITEM_MOD_PARRY_RATING_SHORT",
+    "ITEM_MOD_BLOCK_RATING_SHORT", "ITEM_MOD_RESILIENCE_RATING_SHORT",
+    "ITEM_MOD_SPELL_PENETRATION_SHORT",
+    "ITEM_MOD_MANA_REGENERATION_SHORT", "ITEM_MOD_HEALTH_REGENERATION_SHORT",
+    "ITEM_MOD_ARMOR_PENETRATION_RATING_SHORT",
+    "ITEM_MOD_EXPERTISE_RATING_SHORT",
+}
+
+-- Display name for a GetItemStats key. The keys are global
+-- string names, so the game's own localized name is used
+-- when it exists; otherwise the key is prettified. This keeps
+-- the overview correct in any client locale.
+local function StatLabel(key)
+    if _G and type(_G[key]) == "string" and _G[key] ~= "" then
+        return _G[key]
+    end
+    local s = key:gsub("^ITEM_MOD_", ""):gsub("_SHORT$", ""):gsub("_", " "):lower()
+    return (s:gsub("(%a)(%w*)", function(a, b) return a:upper() .. b end))
+end
+
+-- One wrapped line of summed gear stats, or "" when there is
+-- nothing to show. Values are the summed base item stats
+-- only — GetItemStats has no enchant/gem totals — so the
+-- second line says so plainly rather than implying more.
+local function FormatGearStats(stats)
+    if not stats or next(stats) == nil then return "" end
+    local parts, seen = {}, {}
+    for _, key in ipairs(STAT_ORDER) do
+        local v = stats[key]
+        if v and v ~= 0 then
+            parts[#parts + 1] = string.format("+%d %s", v, StatLabel(key))
+            seen[key] = true
+        end
+    end
+    local rest = {}
+    for key, v in pairs(stats) do
+        if not seen[key] and v ~= 0 then
+            rest[#rest + 1] = { label = StatLabel(key), value = v }
+        end
+    end
+    table.sort(rest, function(a, b) return a.label < b.label end)
+    for _, r in ipairs(rest) do
+        parts[#parts + 1] = string.format("+%d %s", r.value, r.label)
+    end
+    if #parts == 0 then return "" end
+    return "Gear stats: " .. table.concat(parts, "  •  ")
+        .. "\n|cff888888Base item stats only — enchant and gem bonuses not included.|r"
+end
+
+-- Active set bonuses, one line per set: name and worn count,
+-- then the bonuses whose threshold is met. A set with no
+-- bonus met yet still shows its count, so progress toward
+-- the next bonus is visible. "" when the player wears no
+-- set pieces.
+local function FormatSetBonuses(sets)
+    if not sets or #sets == 0 then return "" end
+    local lines = {}
+    for _, s in ipairs(sets) do
+        local active = {}
+        for _, b in ipairs(s.bonusList or {}) do
+            if b.active then active[#active + 1] = b.text end
+        end
+        local line = string.format("%s (%d/%d)", s.name, s.worn, s.total)
+        if #active > 0 then
+            line = line .. ": " .. table.concat(active, "; ")
+        end
+        lines[#lines + 1] = line
+    end
+    if #lines == 0 then return "" end
+    return "Set bonuses:\n" .. table.concat(lines, "\n")
 end
 
 -- ------------------------------------------------------------------
@@ -548,6 +654,8 @@ function GA.ShowDetail(unit)
             entry.upgradeText:SetTextColor(COL_DIM[1], COL_DIM[2], COL_DIM[3])
             entry.flags:SetText("")
         end
+        detailStats:SetText("")
+        detailSets:SetText("")
     end
     if not audit then
         detailSpec:SetText("—")
@@ -571,6 +679,8 @@ function GA.ShowDetail(unit)
         detailAvg:SetText(string.format("%.0f", audit.avgLevel or 0))
         detailSummary:SetText(string.format("(%d items)   •   Missing enchants: %d   •   Missing gems: %d",
             audit.itemCount or 0, audit.missingEnchantCount or 0, audit.missingGemCount or 0))
+        detailStats:SetText(FormatGearStats(audit.stats))
+        detailSets:SetText(FormatSetBonuses(audit.sets))
         for _, entry in ipairs(detailSlots) do
             local slotAudit = audit.gear[entry.slot.id]
             if not slotAudit or slotAudit.empty then
