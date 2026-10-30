@@ -66,5 +66,12 @@ with a screenshot and any Lua error text.
 
 ## Version
 
+1.1.1 — spec resolution fixed against Forever's real API surface
+(verified against Blizzard's `forever` UI source, build 1.60.1.70532):
+inspected specs now resolve via `C_SpecializationInfo.GetInspectSpecialization`
+(the form Blizzard's own Forever inspect UI uses) instead of the bare
+global, and the player-side `C_SpecializationInfo` fallback now handles
+its multi-value returns instead of expecting a table. Also guards
+player names against Midnight-family secret values.
 1.1.0 — gear-stats overview and active set bonuses at the top of the
 detail window, plus the 1.0.0 Forever port of retail Gear Audit v1.5.0.

@@ -84,6 +84,15 @@ local function UnitDisplayName(unit)
     if not UnitName then return unit end
     local name, realm = UnitName(unit)
     if not name then return unit end
+    -- Midnight-family secret values: a restricted unit's name
+    -- or realm may come back as a secret, and comparing or
+    -- concatenating a secret throws. Group members are
+    -- friendly and unrestricted in practice, but guarding
+    -- costs nothing and keeps a secret value from breaking
+    -- the whole overview sort.
+    if issecretvalue and (issecretvalue(name) or (realm and issecretvalue(realm))) then
+        return unit
+    end
     local myRealm = ""
     if GetRealmName then myRealm = GetRealmName() or "" end
     if realm and realm ~= "" and realm ~= myRealm then

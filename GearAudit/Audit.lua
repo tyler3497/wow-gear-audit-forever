@@ -361,14 +361,36 @@ function GA.GetSpecRole(unit)
                 end
             end
         end
-        if not specID and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo then
-            local ok, info = pcall(C_SpecializationInfo.GetSpecializationInfo, GetSpecialization and GetSpecialization() or 1)
-            if ok and type(info) == "table" then
-                specID, specName, specIcon, role = info.id or info.specID, info.name, info.icon, info.role
+        -- Forever-native fallback: C_SpecializationInfo is the
+        -- documented system on Forever (Blizzard's own Forever
+        -- UI uses it). GetSpecializationInfo returns multiple
+        -- values in the same order as the global, so ExtractSpec
+        -- handles it; the old code treated the first return as
+        -- a table and could never assign anything.
+        if not specID and C_SpecializationInfo and C_SpecializationInfo.GetSpecialization and C_SpecializationInfo.GetSpecializationInfo then
+            local okIdx, index = pcall(C_SpecializationInfo.GetSpecialization)
+            if okIdx and index then
+                local info = ExtractSpec(pcall(C_SpecializationInfo.GetSpecializationInfo, index))
+                if info then
+                    specID, specName, specIcon, role = info.id, info.name, info.icon, info.role
+                end
             end
         end
     else
-        if GetInspectSpecialization then
+        -- Forever-native first: Blizzard's own Forever inspect
+        -- UI resolves inspected specs exactly this way
+        -- (C_SpecializationInfo.GetInspectSpecialization, then
+        -- the GetSpecializationInfoByID global). The bare
+        -- global GetInspectSpecialization is only a fallback:
+        -- on Midnight-family clients the C_ form is the one
+        -- that is documented.
+        if C_SpecializationInfo and C_SpecializationInfo.GetInspectSpecialization then
+            local ok, id = pcall(C_SpecializationInfo.GetInspectSpecialization, unit)
+            if ok and id and id ~= 0 then
+                specID = id
+            end
+        end
+        if not specID and GetInspectSpecialization then
             local ok, id = pcall(GetInspectSpecialization, unit)
             if ok and id and id ~= 0 then
                 specID = id
@@ -384,12 +406,6 @@ function GA.GetSpecRole(unit)
             if not role and GetSpecializationRoleByID then
                 local ok, r = pcall(GetSpecializationRoleByID, specID)
                 if ok then role = r end
-            end
-            if not specName and C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfoByID then
-                local ok, info = pcall(C_SpecializationInfo.GetSpecializationInfoByID, specID)
-                if ok and type(info) == "table" then
-                    specName, specIcon, role = info.name, info.icon, info.role
-                end
             end
         end
     end
